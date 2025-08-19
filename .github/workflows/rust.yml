@@ -1,4 +1,4 @@
-name: Rust
+name: Rust CI
 
 on:
   push:
@@ -16,9 +16,18 @@ jobs:
 
     steps:
     - uses: actions/checkout@v4
-    - name: Format
-      run: cargo fmt --verbose
+    - name: Install components
+      # Install clippy and rustfmt components
+      run: rustup component add clippy rustfmt
+    - name: Format check
+      # Check code formatting using rustfmt
+      run: cargo fmt --all -- --check
+    - name: Clippy lint
+      # Run clippy analysis and fail on warnings
+      run: cargo clippy --all-targets --all-features -- -D warnings
     - name: Build
+      # Build the project to ensure compilation succeeds
       run: cargo build --verbose
-    - name: Run tests
+    - name: Test
+      # Run tests to verify functionality
       run: cargo test --verbose

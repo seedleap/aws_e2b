@@ -69,3 +69,14 @@ e2b_access_token = "YOUR_TOKEN" # or set env E2B_ACCESS_TOKEN
 
 ## License
 MIT or Apache-2.0
+
+## Development
+This project uses GitHub Actions to run format checks, Clippy analysis, builds, and tests. To mirror CI locally, run the following commands:
+
+```bash
+rustup component add clippy rustfmt
+cargo fmt --all -- --check
+cargo clippy --all-targets --all-features -- -D warnings
+cargo build --verbose
+cargo test --verbose
+```
