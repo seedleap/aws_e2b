@@ -1,21 +1,21 @@
 # aws_e2b
 
-A CLI to create e2b templates and push base images to AWS ECR for self-hosted e2b.
+一个 CLI 工具，用于在 AWS 上自托管 e2b 时创建模板并将基础镜像推送到 AWS ECR。
 
-## Features
-- Create templates via e2b API
-- Build or select base images (Dockerfile, ECR image, or default image)
-- When building a local Dockerfile, run `docker build` in the Dockerfile directory to ensure `COPY` instructions can access files
-- Push base images to AWS ECR
-- Report build completion and poll build status
+## 功能
+- 通过 e2b API 创建模板
+- 构建或选择基础镜像（Dockerfile、ECR 镜像或默认镜像）
+- 构建本地 Dockerfile 时会在其目录执行 `docker build`，确保 `COPY` 指令能够访问文件
+- 将基础镜像推送到 AWS ECR
+- 通知构建完成并轮询构建状态
 
-## Install
-From source:
+## 安装
+从源码安装：
 ```bash
 cargo install --path .
 ```
 
-## Usage
+## 使用
 ```bash
 aws_e2b template create \
   --config ./aws_e2b.toml \
@@ -27,16 +27,16 @@ aws_e2b template create \
   --docker-file ./Dockerfile
 ```
 
-Or use an existing ECR image:
+或者使用已有的 ECR 镜像：
 ```bash
 aws_e2b template create --config ./aws_e2b.toml --ecr-image 123456789012.dkr.ecr.us-east-1.amazonaws.com/my-image:tag
 ```
 
-## Configuration
-- Template configuration file: `aws_e2b.toml`
-- User configuration: `~/.aws_e2b/config.toml`
+## 配置
+- 模板配置文件：`aws_e2b.toml`
+- 用户配置：`~/.aws_e2b/config.toml`
 
-Example `aws_e2b.toml`:
+示例 `aws_e2b.toml`：
 ```toml
 [e2b]
 memory_mb = 4096
@@ -51,21 +51,22 @@ cpu_count = 4
 # dockerimage = "e2bdev/code-interpreter:latest"
 ```
 
-User config `~/.aws_e2b/config.toml`:
+用户配置 `~/.aws_e2b/config.toml`：
 ```toml
 [aws]
 aws_region = "us-east-1"
 
 [e2b]
 e2b_domain = "e2b.dev"
-e2b_access_token = "YOUR_TOKEN" # or set env E2B_ACCESS_TOKEN
+e2b_access_token = "YOUR_TOKEN" # 或者设置环境变量 E2B_ACCESS_TOKEN
 ```
 
-## Precedence
-- Memory/CPU/start/ready/alias: CLI > `aws_e2b.toml` > defaults
-- AWS Region: env `AWS_REGION` > `~/.aws_e2b/config.toml` `[aws].aws_region`
-- e2b Domain: env `E2B_DOMAIN` > `~/.aws_e2b/config.toml` `[e2b].e2b_domain`
-- Access Token: env `E2B_ACCESS_TOKEN` > `~/.aws_e2b/config.toml` `[e2b].e2b_access_token`
+## 优先级
+- 内存/CPU/启动命令/就绪命令/别名：CLI > `aws_e2b.toml` > 默认值
+- AWS Region：环境变量 `AWS_REGION` > `~/.aws_e2b/config.toml` 中 `[aws].aws_region`
+- e2b Domain：环境变量 `E2B_DOMAIN` > `~/.aws_e2b/config.toml` 中 `[e2b].e2b_domain`
+- Access Token：环境变量 `E2B_ACCESS_TOKEN` > `~/.aws_e2b/config.toml` 中 `[e2b].e2b_access_token`
 
-## License
-MIT or Apache-2.0
+## 许可证
+MIT 或 Apache-2.0
+

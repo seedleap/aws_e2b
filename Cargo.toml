@@ -20,7 +20,7 @@ which = "6.0"
 chrono = { version = "0.4", default-features = false, features = ["clock"] }
 toml = "0.8"
 openssl = { version = "0.10", features = ["vendored"] }
-# Additional AWS SDK, Docker API and async dependencies
+# 额外的 AWS SDK、Docker API 和异步相关依赖
 aws-config = "1.5"
 aws-sdk-sts = "1.28"
 aws-sdk-ecr = "1.38"
