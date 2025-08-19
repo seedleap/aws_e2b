@@ -12,8 +12,6 @@ use log::{error, info, warn};
 use reqwest::header::{HeaderMap, HeaderValue, AUTHORIZATION, CONTENT_TYPE};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
-use tar::Builder as TarBuilder;
-use tempfile::TempDir;
 use xshell::{cmd, Shell};
 
 use aws_config::meta::region::RegionProviderChain;
@@ -138,7 +136,6 @@ struct DockerSection {
     docker_image: Option<String>,
 }
 
-
 #[derive(Debug, Default, Deserialize)]
 struct E2bConfigToml {
     #[serde(default)]
@@ -185,20 +182,18 @@ fn format_bearer_token(token: &str) -> String {
 
 #[tokio::main]
 async fn main() -> Result<()> {
-    env_logger::Builder::from_env(
-        env_logger::Env::default().default_filter_or("info"),
-    )
-    .format(|fmt, record| {
-        use std::io::Write;
-        let ts = chrono::Local::now().format("%H:%M:%S");
-        match record.level() {
-            log::Level::Error | log::Level::Warn => {
-                writeln!(fmt, "{} [{}] {}", ts, record.level(), record.args())
+    env_logger::Builder::from_env(env_logger::Env::default().default_filter_or("info"))
+        .format(|fmt, record| {
+            use std::io::Write;
+            let ts = chrono::Local::now().format("%H:%M:%S");
+            match record.level() {
+                log::Level::Error | log::Level::Warn => {
+                    writeln!(fmt, "{} [{}] {}", ts, record.level(), record.args())
+                }
+                _ => writeln!(fmt, "{} {}", ts, record.args()),
             }
-            _ => writeln!(fmt, "{} {}", ts, record.args()),
-        }
-    })
-    .init();
+        })
+        .init();
     let cli = Cli::parse();
 
     match cli.command {
@@ -224,13 +219,21 @@ async fn run_template_create(args: CreateArgs) -> Result<()> {
     let t_docker_image = e2b_cfg.docker.as_ref().and_then(|s| s.docker_image.clone());
 
     // Resolve values with precedence: CLI > aws_e2b.toml > defaults
-    let resolved_memory_mb = args.e2b.memory_mb.or(t_memory_mb).unwrap_or(DEFAULT_MEMORY_MB);
-    let resolved_cpu = args.e2b.cpu_count.or(t_cpu_count).unwrap_or(DEFAULT_CPU_COUNT);
+    let resolved_memory_mb = args
+        .e2b
+        .memory_mb
+        .or(t_memory_mb)
+        .unwrap_or(DEFAULT_MEMORY_MB);
+    let resolved_cpu = args
+        .e2b
+        .cpu_count
+        .or(t_cpu_count)
+        .unwrap_or(DEFAULT_CPU_COUNT);
     let resolved_start_cmd = args.e2b.start_cmd.clone().or(t_start_cmd);
     let resolved_ready_cmd = args.e2b.ready_cmd.clone().or(t_ready_cmd);
     let resolved_alias = args.e2b.alias.clone().or(t_alias);
 
-    let (create_type, dockerfile_content, base_image_opt) = resolve_create_input(
+    let (create_type, dockerfile_content, base_image_opt, dockerfile_path) = resolve_create_input(
         &args,
         t_dockerfile.as_deref(),
         t_ecr_image.as_deref(),
@@ -308,7 +311,8 @@ async fn run_template_create(args: CreateArgs) -> Result<()> {
     let base_image = match create_type {
         CreateType::Dockerfile => {
             info!("Base image source: dockerfile (built locally)");
-            build_temp_image(&dockerfile_content).await?
+            let path = dockerfile_path.ok_or_else(|| anyhow!("Dockerfile path is required"))?;
+            build_temp_image(&path).await?
         }
         CreateType::EcrImage => {
             let img = base_image_opt.expect("ECR image must be provided");
@@ -354,7 +358,10 @@ fn load_e2b_toml(config_path: Option<&Path>) -> Result<(E2bConfigToml, Option<Pa
         if p.exists() {
             return parse_e2b_toml_file(p).map(|cfg| (cfg, p.parent().map(|d| d.to_path_buf())));
         }
-        return Err(anyhow!("Specified config file does not exist: {}", p.display()));
+        return Err(anyhow!(
+            "Specified config file does not exist: {}",
+            p.display()
+        ));
     }
 
     // Look for aws_e2b.toml in current working directory
@@ -382,14 +389,16 @@ fn resolve_create_input(
     toml_ecr_image: Option<&str>,
     toml_docker_image: Option<&str>,
     toml_base_dir: Option<&Path>,
-) -> Result<(CreateType, String, Option<String>)> {
+) -> Result<(CreateType, String, Option<String>, Option<PathBuf>)> {
     match (&args.docker.docker_file, &args.docker.ecr_image) {
-        (Some(_), Some(_)) => Err(anyhow!("`--docker-file` and `--ecr-image` cannot be used together")),
+        (Some(_), Some(_)) => Err(anyhow!(
+            "`--docker-file` and `--ecr-image` cannot be used together"
+        )),
         (Some(path), None) => {
             let content = fs::read_to_string(path)
                 .with_context(|| format!("Failed to read Dockerfile: {}", path.display()))?;
             info!("Using provided Dockerfile content to create template");
-            Ok((CreateType::Dockerfile, content, None))
+            Ok((CreateType::Dockerfile, content, None, Some(path.clone())))
         }
         (None, Some(image)) => {
             info!("Using provided ECR image to create template: {}", image);
@@ -397,6 +406,7 @@ fn resolve_create_input(
                 CreateType::EcrImage,
                 format!("FROM {}", image),
                 Some(image.clone()),
+                None,
             ))
         }
         (None, None) => {
@@ -407,6 +417,7 @@ fn resolve_create_input(
                     CreateType::EcrImage,
                     format!("FROM {}", image),
                     Some(image.to_string()),
+                    None,
                 ));
             }
             if let Some(dockerfile_path) = toml_dockerfile_path {
@@ -420,20 +431,33 @@ fn resolve_create_input(
                 } else {
                     raw.to_path_buf()
                 };
-                let content = fs::read_to_string(&path)
-                    .with_context(|| format!("Failed to read dockerfile from TOML path: {}", path.display()))?;
-                info!("Using Dockerfile path from aws_e2b.toml: {}", path.display());
-                return Ok((CreateType::Dockerfile, content, None));
+                let content = fs::read_to_string(&path).with_context(|| {
+                    format!(
+                        "Failed to read dockerfile from TOML path: {}",
+                        path.display()
+                    )
+                })?;
+                info!(
+                    "Using Dockerfile path from aws_e2b.toml: {}",
+                    path.display()
+                );
+                return Ok((CreateType::Dockerfile, content, None, Some(path)));
             }
             // dockerimage from TOML as default base image
             if let Some(img) = toml_docker_image {
-                info!("Using dockerimage from aws_e2b.toml as default base image: {}", img);
+                info!(
+                    "Using dockerimage from aws_e2b.toml as default base image: {}",
+                    img
+                );
                 let dockerfile = format!("FROM {}", img);
-                return Ok((CreateType::Default, dockerfile, None));
+                return Ok((CreateType::Default, dockerfile, None, None));
             }
             let default_dockerfile = format!("FROM {}", DEFAULT_IMAGE);
-            info!("Using default base image to create template: {}", DEFAULT_IMAGE);
-            Ok((CreateType::Default, default_dockerfile, None))
+            info!(
+                "Using default base image to create template: {}",
+                DEFAULT_IMAGE
+            );
+            Ok((CreateType::Default, default_dockerfile, None, None))
         }
     }
 }
@@ -476,6 +500,7 @@ fn read_user_config() -> Result<Option<UserConfig>> {
     Ok(Some(cfg))
 }
 
+#[allow(clippy::too_many_arguments)] // Many parameters in the API call; keep them explicit
 async fn create_template(
     e2b_domain: &str,
     access_token: &str,
@@ -527,7 +552,7 @@ async fn get_ecr_auth(ecr_client: &ecr::Client) -> Result<(String, DockerCredent
     let decoded = base64::engine::general_purpose::STANDARD
         .decode(token_b64)
         .context("Failed to decode ECR authorization token")?;
-    let decoded_str = String::from_utf8(decoded)?; // 形如 "AWS:password"
+    let decoded_str = String::from_utf8(decoded)?; // The decoded string looks like "AWS:password"
     let mut parts = decoded_str.splitn(2, ':');
     let username = parts.next().unwrap_or("AWS").to_string();
     let password = parts.next().unwrap_or("").to_string();
@@ -557,28 +582,21 @@ async fn create_ecr_repo_if_needed(ecr_client: &ecr::Client, template_id: &str) 
     Ok(())
 }
 
-async fn build_temp_image(dockerfile_content: &str) -> Result<String> {
-    let temp_dir = TempDir::new().context("Failed to create temporary directory")?;
-    let dockerfile_path = temp_dir.path().join("Dockerfile");
-    fs::write(&dockerfile_path, dockerfile_content).context("Failed to write temporary Dockerfile")?;
-
-    // 构建 tar 作为 build context
-    let mut tar_buf = Vec::new();
-    {
-        let mut tar_builder = TarBuilder::new(&mut tar_buf);
-        tar_builder
-            .append_path_with_name(&dockerfile_path, "Dockerfile")
-            .context("Failed to append Dockerfile to tar")?;
-        tar_builder.finish().context("Failed to finalize tar")?;
-    }
-
+async fn build_temp_image(dockerfile_path: &Path) -> Result<String> {
+    // Run the build in the Dockerfile directory to keep COPY instructions working
     let tag = format!("temp_image_{}", chrono::Utc::now().timestamp());
     info!("Building image from Dockerfile: {}", tag);
 
-    // 使用 docker CLI 构建以获得稳定的进度折叠
+    // Use docker CLI build for stable progress output
     let sh = Shell::new().context("Failed to create shell")?;
-    let tmp = temp_dir.path();
-    cmd!(sh, "docker build -t {tag} -f {tmp}/Dockerfile {tmp}").run()?;
+    let context_dir = dockerfile_path
+        .parent()
+        .ok_or_else(|| anyhow!("Dockerfile has no parent directory"))?;
+    cmd!(
+        sh,
+        "docker build -t {tag} -f {dockerfile_path} {context_dir}"
+    )
+    .run()?;
     Ok(tag)
 }
 

@@ -5,6 +5,7 @@ A CLI to create e2b templates and push base images to AWS ECR for self-hosted e2
 ## Features
 - Create templates via e2b API
 - Build or select base images (Dockerfile, ECR image, or default image)
+- When building a local Dockerfile, run `docker build` in the Dockerfile directory to ensure `COPY` instructions can access files
 - Push base images to AWS ECR
 - Report build completion and poll build status
 
