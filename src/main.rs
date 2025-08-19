@@ -583,12 +583,12 @@ async fn create_ecr_repo_if_needed(ecr_client: &ecr::Client, template_id: &str) 
 }
 
 async fn build_temp_image(dockerfile_path: &Path) -> Result<String> {
-    // 在 Dockerfile 所在目录运行构建，保证 COPY 等指令可以访问到所需文件
+    // Run the build in the Dockerfile's directory so COPY instructions can access required files
     let tag = format!("temp_image_{}", chrono::Utc::now().timestamp());
     info!("Building image from Dockerfile: {}", tag);
 
-    // 使用 docker CLI 构建以获得稳定的进度输出
-    let sh = Shell::new().context("创建 shell 失败")?;
+    // Use the docker CLI to build for stable progress output
+    let sh = Shell::new().context("failed to create shell")?;
     let context_dir = dockerfile_path
         .parent()
         .filter(|p| !p.as_os_str().is_empty())
