@@ -593,9 +593,10 @@ async fn build_temp_image(dockerfile_path: &Path) -> Result<String> {
         .parent()
         .filter(|p| !p.as_os_str().is_empty())
         .unwrap_or_else(|| Path::new("."));
+    // e2b currently does not support ARM images, so enforce linux/amd64 platform during build
     cmd!(
         sh,
-        "docker build -t {tag} -f {dockerfile_path} {context_dir}"
+        "docker build --platform linux/amd64 -t {tag} -f {dockerfile_path} {context_dir}"
     )
     .run()?;
     Ok(tag)
