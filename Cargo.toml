@@ -2,7 +2,7 @@
 name = "aws_e2b"
 version = "0.1.0"
 edition = "2021"
-description = "CLI to create e2b templates and push base images to AWS ECR for self-hosted e2b"
+description = "CLI to build e2b templates and push base images to AWS ECR"
 license = "MIT OR Apache-2.0"
 readme = "README.md"
 homepage = "https://github.com/leap/leap_server"
