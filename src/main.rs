@@ -45,13 +45,13 @@ struct TemplateCli {
 
 #[derive(Subcommand, Debug)]
 enum TemplateCommands {
-    /// Create a template
-    Create(CreateArgs),
+    /// Build a template
+    Build(BuildArgs),
 }
 
 #[derive(Parser, Debug)]
-struct CreateArgs {
-    /// Path to aws_e2b.toml (optional). If not provided, the tool looks for ./aws_e2b.toml.
+struct BuildArgs {
+    /// Path to aws_e2b.toml (optional). If omitted, defaults to ./aws_e2b.toml.
     #[arg(long = "config")]
     config_path: Option<PathBuf>,
 
@@ -64,30 +64,33 @@ struct CreateArgs {
 
 #[derive(Parser, Debug, Clone)]
 struct E2bArgs {
-    /// Override memory (MB)
+    /// Override memory size (MB)
     #[arg(long = "memory-mb", help_heading = "E2B")]
     memory_mb: Option<u32>,
 
-    /// Override CPU cores
+    /// Override number of CPU cores
     #[arg(long = "cpu-count", help_heading = "E2B")]
     cpu_count: Option<u32>,
 
-    /// Optional: startup command passed to server
+    /// Optional start command executed on startup
     #[arg(long = "start-cmd", help_heading = "E2B")]
     start_cmd: Option<String>,
 
-    /// Optional: readiness check command passed to server
+    /// Optional readiness check command
     #[arg(long = "ready-cmd", help_heading = "E2B")]
     ready_cmd: Option<String>,
 
-    /// Optional: template alias
+    /// Optional template alias
     #[arg(long = "alias", help_heading = "E2B")]
     alias: Option<String>,
+    /// Use existing template ID to build
+    #[arg(long = "template-id", help_heading = "E2B")]
+    template_id: Option<String>,
 }
 
 #[derive(Parser, Debug, Clone)]
 struct DockerArgs {
-    /// Path to a Dockerfile; its content will be used directly
+    /// Path to a Dockerfile; its contents will be used directly
     #[arg(long = "docker-file", help_heading = "DOCKER")]
     docker_file: Option<PathBuf>,
 
@@ -101,7 +104,7 @@ struct DockerArgs {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-enum CreateType {
+enum BuildType {
     Default,
     Dockerfile,
     EcrImage,
@@ -119,6 +122,8 @@ struct E2bSection {
     ready_cmd: Option<String>,
     #[serde(default)]
     alias: Option<String>,
+    #[serde(default, rename = "template_id", alias = "templateID")]
+    template_id: Option<String>,
 }
 
 #[derive(Debug, Default, Deserialize)]
@@ -145,7 +150,7 @@ struct E2bConfigToml {
 }
 
 #[derive(Serialize)]
-struct CreateTemplateRequest<'a> {
+struct BuildTemplateRequest<'a> {
     dockerfile: &'a str,
     #[serde(rename = "memoryMB")]
     memory_mb: u32,
@@ -160,7 +165,7 @@ struct CreateTemplateRequest<'a> {
 }
 
 #[derive(Deserialize)]
-struct CreateTemplateResponse {
+struct BuildTemplateResponse {
     #[serde(rename = "buildID")]
     build_id: String,
     #[serde(rename = "templateID")]
@@ -198,13 +203,13 @@ async fn main() -> Result<()> {
 
     match cli.command {
         Commands::Template(t) => match t.command {
-            TemplateCommands::Create(args) => run_template_create(args).await,
+            TemplateCommands::Build(args) => run_template_build(args).await,
         },
     }
 }
 
-async fn run_template_create(args: CreateArgs) -> Result<()> {
-    // Load aws_e2b.toml (template-related only), optional
+async fn run_template_build(args: BuildArgs) -> Result<()> {
+    // Load aws_e2b.toml (template-related config only, optional)
     let (e2b_cfg, e2b_dir) = load_e2b_toml(args.config_path.as_deref())?;
 
     // Extract template-related configuration
@@ -213,12 +218,13 @@ async fn run_template_create(args: CreateArgs) -> Result<()> {
     let t_start_cmd = e2b_cfg.e2b.as_ref().and_then(|s| s.start_cmd.clone());
     let t_ready_cmd = e2b_cfg.e2b.as_ref().and_then(|s| s.ready_cmd.clone());
     let t_alias = e2b_cfg.e2b.as_ref().and_then(|s| s.alias.clone());
+    let t_template_id = e2b_cfg.e2b.as_ref().and_then(|s| s.template_id.clone());
 
     let t_dockerfile = e2b_cfg.docker.as_ref().and_then(|s| s.dockerfile.clone());
     let t_ecr_image = e2b_cfg.docker.as_ref().and_then(|s| s.ecr_image.clone());
     let t_docker_image = e2b_cfg.docker.as_ref().and_then(|s| s.docker_image.clone());
 
-    // Resolve values with precedence: CLI > aws_e2b.toml > defaults
+    // Resolve parameter precedence: CLI > aws_e2b.toml > defaults
     let resolved_memory_mb = args
         .e2b
         .memory_mb
@@ -232,8 +238,9 @@ async fn run_template_create(args: CreateArgs) -> Result<()> {
     let resolved_start_cmd = args.e2b.start_cmd.clone().or(t_start_cmd);
     let resolved_ready_cmd = args.e2b.ready_cmd.clone().or(t_ready_cmd);
     let resolved_alias = args.e2b.alias.clone().or(t_alias);
+    let resolved_template_id = args.e2b.template_id.clone().or(t_template_id);
 
-    let (create_type, dockerfile_content, base_image_opt, dockerfile_path) = resolve_create_input(
+    let (build_type, dockerfile_content, base_image_opt, dockerfile_path) = resolve_build_input(
         &args,
         t_dockerfile.as_deref(),
         t_ecr_image.as_deref(),
@@ -241,10 +248,10 @@ async fn run_template_create(args: CreateArgs) -> Result<()> {
         e2b_dir.as_deref(),
     )?;
 
-    // Read user config from ~/.aws_e2b/config.toml
+    // Read user config ~/.aws_e2b/config.toml
     let user_cfg = read_user_config().ok().flatten();
 
-    // AWS region: ENV > user config ([aws])
+    // AWS Region order: env var > user config ([aws])
     let user_aws_region = user_cfg
         .as_ref()
         .and_then(|c| c.aws.as_ref().and_then(|a| a.aws_region.clone()));
@@ -253,7 +260,7 @@ async fn run_template_create(args: CreateArgs) -> Result<()> {
             "Missing AWS region: set AWS_REGION or configure [aws].aws_region in ~/.aws_e2b/config.toml"
         ))?;
 
-    // e2b domain: ENV > user config ([e2b])
+    // e2b domain order: env var > user config ([e2b])
     let user_e2b_domain = user_cfg
         .as_ref()
         .and_then(|c| c.e2b.as_ref().and_then(|e| e.e2b_domain.clone()));
@@ -262,7 +269,7 @@ async fn run_template_create(args: CreateArgs) -> Result<()> {
             "Missing e2b domain: set E2B_DOMAIN or configure [e2b].e2b_domain in ~/.aws_e2b/config.toml"
         ))?;
 
-    // Access token: ENV > user config ([e2b])
+    // Access token order: env var > user config ([e2b])
     let user_token = user_cfg
         .as_ref()
         .and_then(|c| c.e2b.as_ref().and_then(|e| e.e2b_access_token.clone()));
@@ -274,7 +281,11 @@ async fn run_template_create(args: CreateArgs) -> Result<()> {
         ))?;
     let e2b_access_token = format_bearer_token(&raw_access_token);
 
-    let (build_id, template_id) = create_template(
+    if let Some(ref tid) = resolved_template_id {
+        info!("Building with configured template_id: {}", tid);
+    }
+
+    let (build_id, template_id) = build_template(
         &e2b_domain,
         &e2b_access_token,
         &dockerfile_content,
@@ -283,6 +294,7 @@ async fn run_template_create(args: CreateArgs) -> Result<()> {
         resolved_start_cmd.clone(),
         resolved_ready_cmd.clone(),
         resolved_alias.clone(),
+        resolved_template_id.clone(),
     )
     .await?;
     info!("buildID: {}", build_id);
@@ -301,26 +313,26 @@ async fn run_template_create(args: CreateArgs) -> Result<()> {
     let aws_account_id = fetch_aws_account_id(&sts_client).await?;
     info!("AWS Account ID: {}", aws_account_id);
 
-    // Acquire ECR authorization (for push/pull)
+    // Get ECR authorization info (for push/pull)
     let (registry, docker_creds) = get_ecr_auth(&ecr_client).await?;
 
     // Ensure ECR repository exists
     create_ecr_repo_if_needed(&ecr_client, &template_id).await?;
 
     // Prepare base image
-    let base_image = match create_type {
-        CreateType::Dockerfile => {
+    let base_image = match build_type {
+        BuildType::Dockerfile => {
             info!("Base image source: dockerfile (built locally)");
             let path = dockerfile_path.ok_or_else(|| anyhow!("Dockerfile path is required"))?;
             build_temp_image(&path).await?
         }
-        CreateType::EcrImage => {
+        BuildType::EcrImage => {
             let img = base_image_opt.expect("ECR image must be provided");
             info!("Base image source: ecr-image, value: {}", img);
             pull_docker_image(&img, Some(&docker_creds)).await?;
             img
         }
-        CreateType::Default => {
+        BuildType::Default => {
             let chosen = args
                 .docker
                 .base_image
@@ -353,7 +365,7 @@ async fn run_template_create(args: CreateArgs) -> Result<()> {
 }
 
 fn load_e2b_toml(config_path: Option<&Path>) -> Result<(E2bConfigToml, Option<PathBuf>)> {
-    // Prefer explicit --config path
+    // Prefer explicitly specified --config path
     if let Some(p) = config_path {
         if p.exists() {
             return parse_e2b_toml_file(p).map(|cfg| (cfg, p.parent().map(|d| d.to_path_buf())));
@@ -364,7 +376,7 @@ fn load_e2b_toml(config_path: Option<&Path>) -> Result<(E2bConfigToml, Option<Pa
         ));
     }
 
-    // Look for aws_e2b.toml in current working directory
+    // Look for aws_e2b.toml in the current directory
     let cwd = std::env::current_dir()?;
     let path = cwd.join("aws_e2b.toml");
     if path.exists() {
@@ -383,13 +395,13 @@ fn parse_e2b_toml_file(path: &Path) -> Result<E2bConfigToml> {
     Ok(cfg)
 }
 
-fn resolve_create_input(
-    args: &CreateArgs,
+fn resolve_build_input(
+    args: &BuildArgs,
     toml_dockerfile_path: Option<&str>,
     toml_ecr_image: Option<&str>,
     toml_docker_image: Option<&str>,
     toml_base_dir: Option<&Path>,
-) -> Result<(CreateType, String, Option<String>, Option<PathBuf>)> {
+) -> Result<(BuildType, String, Option<String>, Option<PathBuf>)> {
     match (&args.docker.docker_file, &args.docker.ecr_image) {
         (Some(_), Some(_)) => Err(anyhow!(
             "`--docker-file` and `--ecr-image` cannot be used together"
@@ -397,24 +409,24 @@ fn resolve_create_input(
         (Some(path), None) => {
             let content = fs::read_to_string(path)
                 .with_context(|| format!("Failed to read Dockerfile: {}", path.display()))?;
-            info!("Using provided Dockerfile content to create template");
-            Ok((CreateType::Dockerfile, content, None, Some(path.clone())))
+            info!("Building template with provided Dockerfile content");
+            Ok((BuildType::Dockerfile, content, None, Some(path.clone())))
         }
         (None, Some(image)) => {
-            info!("Using provided ECR image to create template: {}", image);
+            info!("Building template with provided ECR image: {}", image);
             Ok((
-                CreateType::EcrImage,
+                BuildType::EcrImage,
                 format!("FROM {}", image),
                 Some(image.clone()),
                 None,
             ))
         }
         (None, None) => {
-            // ecr image from TOML
+            // Get ecr-image from config file
             if let Some(image) = toml_ecr_image {
                 info!("Using ecr-image from aws_e2b.toml: {}", image);
                 return Ok((
-                    CreateType::EcrImage,
+                    BuildType::EcrImage,
                     format!("FROM {}", image),
                     Some(image.to_string()),
                     None,
@@ -441,23 +453,23 @@ fn resolve_create_input(
                     "Using Dockerfile path from aws_e2b.toml: {}",
                     path.display()
                 );
-                return Ok((CreateType::Dockerfile, content, None, Some(path)));
+                return Ok((BuildType::Dockerfile, content, None, Some(path)));
             }
-            // dockerimage from TOML as default base image
+            // Use dockerimage from config file as default base image
             if let Some(img) = toml_docker_image {
                 info!(
                     "Using dockerimage from aws_e2b.toml as default base image: {}",
                     img
                 );
                 let dockerfile = format!("FROM {}", img);
-                return Ok((CreateType::Default, dockerfile, None, None));
+                return Ok((BuildType::Default, dockerfile, None, None));
             }
             let default_dockerfile = format!("FROM {}", DEFAULT_IMAGE);
             info!(
-                "Using default base image to create template: {}",
+                "Using default base image to build template: {}",
                 DEFAULT_IMAGE
             );
-            Ok((CreateType::Default, default_dockerfile, None, None))
+            Ok((BuildType::Default, default_dockerfile, None, None))
         }
     }
 }
@@ -500,8 +512,8 @@ fn read_user_config() -> Result<Option<UserConfig>> {
     Ok(Some(cfg))
 }
 
-#[allow(clippy::too_many_arguments)] // Many parameters in the API call; keep them explicit
-async fn create_template(
+#[allow(clippy::too_many_arguments)] // keep arguments explicit
+async fn build_template(
     e2b_domain: &str,
     access_token: &str,
     dockerfile: &str,
@@ -510,29 +522,38 @@ async fn create_template(
     start_cmd: Option<String>,
     ready_cmd: Option<String>,
     alias: Option<String>,
+    template_id: Option<String>,
 ) -> Result<(String, String)> {
-    let url = format!("https://api.{}/templates", e2b_domain);
-    info!("Calling API to create template: {}", url);
+    let url = if let Some(ref tid) = template_id {
+        format!("https://api.{}/templates/{}", e2b_domain, tid)
+    } else {
+        format!("https://api.{}/templates", e2b_domain)
+    };
+    info!("Calling API to build template: {}", url);
     let mut headers = HeaderMap::new();
     headers.insert(AUTHORIZATION, HeaderValue::from_str(access_token)?);
     headers.insert(CONTENT_TYPE, HeaderValue::from_static("application/json"));
     let client = reqwest::Client::new();
-    let body = CreateTemplateRequest {
+    let body = BuildTemplateRequest {
         dockerfile,
         memory_mb,
         cpu_count,
         start_cmd: start_cmd.as_deref(),
         ready_cmd: ready_cmd.as_deref(),
-        alias: alias.as_deref(),
+        alias: if template_id.is_some() {
+            None
+        } else {
+            alias.as_deref()
+        },
     };
     let resp = client.post(url).headers(headers).json(&body).send().await?;
     let status = resp.status();
     let text = resp.text().await?;
     if !status.is_success() {
-        error!("Create template failed HTTP {}: {}", status, text);
-        return Err(anyhow!("Create template failed HTTP {}", status));
+        error!("Template build failed HTTP {}: {}", status, text);
+        return Err(anyhow!("Template build failed HTTP {}", status));
     }
-    let parsed: CreateTemplateResponse = serde_json::from_str(&text)?;
+    let parsed: BuildTemplateResponse = serde_json::from_str(&text)?;
     Ok((parsed.build_id, parsed.template_id))
 }
 
@@ -552,7 +573,8 @@ async fn get_ecr_auth(ecr_client: &ecr::Client) -> Result<(String, DockerCredent
     let decoded = base64::engine::general_purpose::STANDARD
         .decode(token_b64)
         .context("Failed to decode ECR authorization token")?;
-    let decoded_str = String::from_utf8(decoded)?; // The decoded string looks like "AWS:password"
+    // Decoded result looks like "AWS:password"
+    let decoded_str = String::from_utf8(decoded)?;
     let mut parts = decoded_str.splitn(2, ':');
     let username = parts.next().unwrap_or("AWS").to_string();
     let password = parts.next().unwrap_or("").to_string();
@@ -583,17 +605,17 @@ async fn create_ecr_repo_if_needed(ecr_client: &ecr::Client, template_id: &str) 
 }
 
 async fn build_temp_image(dockerfile_path: &Path) -> Result<String> {
-    // Run the build in the Dockerfile's directory so COPY instructions can access required files
+    // Run docker build in the Dockerfile directory so COPY instructions can access files
     let tag = format!("temp_image_{}", chrono::Utc::now().timestamp());
     info!("Building image from Dockerfile: {}", tag);
 
-    // Use the docker CLI to build for stable progress output
+    // Use docker CLI to build for stable output
     let sh = Shell::new().context("failed to create shell")?;
     let context_dir = dockerfile_path
         .parent()
         .filter(|p| !p.as_os_str().is_empty())
         .unwrap_or_else(|| Path::new("."));
-    // e2b currently does not support ARM images, so enforce linux/amd64 platform during build
+    // e2b currently does not support ARM, so enforce platform linux/amd64
     cmd!(
         sh,
         "docker build --platform linux/amd64 -t {tag} -f {dockerfile_path} {context_dir}"
@@ -605,7 +627,7 @@ async fn build_temp_image(dockerfile_path: &Path) -> Result<String> {
 async fn pull_docker_image(image: &str, creds: Option<&DockerCredentials>) -> Result<()> {
     info!("Pulling image (docker CLI): {}", image);
     let sh = Shell::new().context("Failed to create shell")?;
-    // Login if credentials are provided
+    // If credentials are provided, log in first
     if let Some(c) = creds {
         if let (Some(user), Some(pass), Some(server)) = (
             c.username.as_ref(),
@@ -630,6 +652,7 @@ async fn tag_image(source: &str, target: &str) -> Result<()> {
 async fn push_image(target: &str, creds: &DockerCredentials) -> Result<()> {
     info!("Pushing image (docker CLI): {}", target);
     let sh = Shell::new().context("Failed to create shell")?;
+    // Log in to the target registry before pushing
     if let (Some(user), Some(pass), Some(server)) = (
         creds.username.as_ref(),
         creds.password.as_ref(),

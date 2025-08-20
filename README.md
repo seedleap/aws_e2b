@@ -1,12 +1,12 @@
 # aws_e2b
 
-A CLI to create e2b templates and push base images to AWS ECR for self-hosted e2b.
+A CLI to build e2b templates and push base images to AWS ECR for self-hosted e2b.
 
 ## Features
-- Create templates via e2b API
+- Build templates via the e2b API
 - Build or select base images (Dockerfile, ECR image, or default image)
 - When building a local Dockerfile, run `docker build` in its directory so `COPY` instructions can access files
-- By default, `docker build` uses `--platform linux/amd64` to restrict the target architecture
+- `docker build` defaults to `--platform linux/amd64` to restrict the architecture
 - Push base images to AWS ECR
 - Report build completion and poll build status
 
@@ -18,7 +18,7 @@ cargo install --path .
 
 ## Usage
 ```bash
-aws_e2b template create \
+aws_e2b template build \
   --config ./aws_e2b.toml \
   --memory-mb 4096 \
   --cpu-count 4 \
@@ -30,7 +30,7 @@ aws_e2b template create \
 
 Or use an existing ECR image:
 ```bash
-aws_e2b template create --config ./aws_e2b.toml --ecr-image 123456789012.dkr.ecr.us-east-1.amazonaws.com/my-image:tag
+aws_e2b template build --config ./aws_e2b.toml --ecr-image 123456789012.dkr.ecr.us-east-1.amazonaws.com/my-image:tag
 ```
 
 ## Configuration
@@ -45,6 +45,7 @@ cpu_count = 4
 # start_cmd = "/root/.jupyter/start-up.sh"
 # ready_cmd = "curl -sf http://127.0.0.1:8888/health"
 # alias = "ci-python"
+# template_id = "j4iitty8yuz06tfnm5du" # Use existing template ID to build
 
 [docker]
 # dockerfile = "./Dockerfile"
@@ -64,6 +65,7 @@ e2b_access_token = "YOUR_TOKEN" # or set env E2B_ACCESS_TOKEN
 
 ## Precedence
 - Memory/CPU/start/ready/alias: CLI > `aws_e2b.toml` > defaults
+- template_id: CLI > `aws_e2b.toml` > create new template automatically
 - AWS Region: env `AWS_REGION` > `~/.aws_e2b/config.toml` `[aws].aws_region`
 - e2b Domain: env `E2B_DOMAIN` > `~/.aws_e2b/config.toml` `[e2b].e2b_domain`
 - Access Token: env `E2B_ACCESS_TOKEN` > `~/.aws_e2b/config.toml` `[e2b].e2b_access_token`
@@ -72,7 +74,7 @@ e2b_access_token = "YOUR_TOKEN" # or set env E2B_ACCESS_TOKEN
 MIT or Apache-2.0
 
 ## Development
-This project uses GitHub Actions to run format checks, Clippy analysis, builds, and tests. To mirror CI locally, run the following commands:
+This project uses GitHub Actions for format checks, Clippy analysis, builds, and tests. To mirror CI locally, run:
 
 ```bash
 rustup component add clippy rustfmt
