@@ -7,7 +7,7 @@ use std::{
 use anyhow::{anyhow, Context, Result};
 use base64::Engine;
 use bollard::auth::DockerCredentials;
-use clap::{Parser, Subcommand};
+use clap::Parser;
 use log::{error, info, warn};
 use reqwest::header::{HeaderMap, HeaderValue, AUTHORIZATION, CONTENT_TYPE};
 use serde::{Deserialize, Serialize};
@@ -23,31 +23,6 @@ use aws_sdk_sts as sts;
 const DEFAULT_MEMORY_MB: u32 = 4096;
 const DEFAULT_CPU_COUNT: u32 = 4;
 const DEFAULT_IMAGE: &str = "e2bdev/code-interpreter:latest";
-
-#[derive(Parser, Debug)]
-#[command(name = "aws_e2b", version, about = "CLI for self-hosting e2b on AWS")]
-struct Cli {
-    #[command(subcommand)]
-    command: Commands,
-}
-
-#[derive(Subcommand, Debug)]
-enum Commands {
-    /// Template related commands
-    Template(TemplateCli),
-}
-
-#[derive(Parser, Debug)]
-struct TemplateCli {
-    #[command(subcommand)]
-    command: TemplateCommands,
-}
-
-#[derive(Subcommand, Debug)]
-enum TemplateCommands {
-    /// Build a template
-    Build(BuildArgs),
-}
 
 #[derive(Parser, Debug)]
 struct BuildArgs {
@@ -199,13 +174,65 @@ async fn main() -> Result<()> {
             }
         })
         .init();
-    let cli = Cli::parse();
 
-    match cli.command {
-        Commands::Template(t) => match t.command {
-            TemplateCommands::Build(args) => run_template_build(args).await,
-        },
+    // Collect raw CLI arguments excluding the binary name
+    let args: Vec<String> = env::args().skip(1).collect();
+
+    // Block unsupported auth command
+    if args.first().map(|s| s.as_str()) == Some("auth") {
+        error!("aws_e2b does not support the e2b auth command");
+        std::process::exit(1);
     }
+
+    // Handle template build internally
+    if args.first().map(|s| s.as_str()) == Some("template")
+        && args.get(1).map(|s| s.as_str()) == Some("build")
+    {
+        let build_args = BuildArgs::parse_from(
+            std::iter::once("aws_e2b".to_string()).chain(args.iter().skip(2).cloned()),
+        );
+        return run_template_build(build_args).await;
+    }
+
+    // All other commands are proxied to e2b CLI
+    proxy_to_e2b(&args)?;
+    Ok(())
+}
+
+/// Proxy unimplemented commands to the e2b CLI and inject required environment variables
+fn proxy_to_e2b(args: &[String]) -> Result<()> {
+    let (domain_opt, token_opt) = resolve_e2b_env_vars();
+
+    let mut command = std::process::Command::new("e2b");
+    command.args(args);
+    if let Some(domain) = domain_opt {
+        command.env("E2B_DOMAIN", domain);
+    }
+    if let Some(token) = token_opt {
+        command.env("E2B_ACCESS_TOKEN", token);
+    }
+
+    let status = command.status().context("failed to execute e2b command")?;
+    if !status.success() {
+        return Err(anyhow!("e2b command failed"));
+    }
+    Ok(())
+}
+
+/// Resolve e2b environment variables from the process environment or user configuration
+fn resolve_e2b_env_vars() -> (Option<String>, Option<String>) {
+    let user_cfg = read_user_config().ok().flatten();
+    let domain = env::var("E2B_DOMAIN").ok().or_else(|| {
+        user_cfg
+            .as_ref()
+            .and_then(|c| c.e2b.as_ref().and_then(|e| e.e2b_domain.clone()))
+    });
+    let token = env::var("E2B_ACCESS_TOKEN").ok().or_else(|| {
+        user_cfg
+            .as_ref()
+            .and_then(|c| c.e2b.as_ref().and_then(|e| e.e2b_access_token.clone()))
+    });
+    (domain, token)
 }
 
 async fn run_template_build(args: BuildArgs) -> Result<()> {
