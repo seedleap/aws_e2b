@@ -33,6 +33,15 @@ Or use an existing ECR image:
 aws_e2b template build --config ./aws_e2b.toml --ecr-image 123456789012.dkr.ecr.us-east-1.amazonaws.com/my-image:tag
 ```
 
+## Proxy other commands
+`aws_e2b` only implements `template build` internally. All other subcommands are forwarded to the official `e2b` CLI.
+During forwarding, the `E2B_DOMAIN` and `E2B_ACCESS_TOKEN` environment variables are set automatically if they exist in the environment or user configuration.
+Example:
+```bash
+aws_e2b template list  # equivalent to e2b template list
+```
+The `auth` subcommand is not supported and will not be proxied.
+
 ## Configuration
 - Template configuration file: `aws_e2b.toml`
 - User configuration: `~/.aws_e2b/config.toml`
