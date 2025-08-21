@@ -5,8 +5,8 @@ edition = "2021"
 description = "CLI to build e2b templates and push base images to AWS ECR"
 license = "MIT OR Apache-2.0"
 readme = "README.md"
-homepage = "https://github.com/leap/leap_server"
-repository = "https://github.com/leap/leap_server"
+homepage = "https://github.com/seedleap/aws_e2b"
+repository = "https://github.com/seedleap/aws_e2b"
 keywords = ["e2b", "aws", "ecr", "cli", "templates"]
 categories = ["command-line-utilities", "development-tools"]
 
