@@ -1,6 +1,5 @@
 use anyhow::{anyhow, Context, Result};
 use clap::Parser;
-use log::error;
 use std::env;
 
 mod args;
@@ -10,7 +9,7 @@ mod config;
 mod docker_utils;
 mod e2b_api;
 
-use args::BuildArgs;
+use args::{AwsE2bCli, AwsE2bCommand, ListArgs, TemplateCommand};
 use build::run_template_build;
 use config::read_user_config;
 
@@ -29,29 +28,29 @@ async fn main() -> Result<()> {
         })
         .init();
 
-    let args: Vec<String> = env::args().skip(1).collect();
+    let cli = AwsE2bCli::parse();
 
-    if args.first().map(|s| s.as_str()) == Some("auth") {
-        error!("aws_e2b does not support the e2b auth command");
-        std::process::exit(1);
+    match cli.command {
+        AwsE2bCommand::Template { command } => match command {
+            TemplateCommand::Build(build_args) => run_template_build(build_args).await,
+            TemplateCommand::List(list_args) => {
+                run_template_list(list_args)?;
+                Ok(())
+            }
+        },
+        AwsE2bCommand::Sandbox(sandbox_args) => {
+            let forward_args = std::iter::once("sandbox".to_string())
+                .chain(sandbox_args.args.into_iter())
+                .collect::<Vec<String>>();
+            proxy_to_e2b(&forward_args)?;
+            Ok(())
+        }
     }
-
-    if args.first().map(|s| s.as_str()) == Some("template")
-        && args.get(1).map(|s| s.as_str()) == Some("build")
-    {
-        let build_args = BuildArgs::parse_from(
-            std::iter::once("aws_e2b".to_string()).chain(args.iter().skip(2).cloned()),
-        );
-        return run_template_build(build_args).await;
-    }
-
-    proxy_to_e2b(&args)?;
-    Ok(())
 }
 
-/// Forward unsupported commands to the e2b command-line interface and inject required environment variables
+/// Forward a command to the official e2b CLI and inject domain, access token, and API key environment variables
 fn proxy_to_e2b(args: &[String]) -> Result<()> {
-    let (domain_opt, token_opt) = resolve_e2b_env_vars();
+    let (domain_opt, token_opt, api_key_opt) = resolve_e2b_env_vars();
 
     let mut command = std::process::Command::new("e2b");
     command.args(args);
@@ -61,6 +60,9 @@ fn proxy_to_e2b(args: &[String]) -> Result<()> {
     if let Some(token) = token_opt {
         command.env("E2B_ACCESS_TOKEN", token);
     }
+    if let Some(api_key) = api_key_opt {
+        command.env("E2B_API_KEY", api_key);
+    }
 
     let status = command.status().context("failed to execute e2b command")?;
     if !status.success() {
@@ -69,8 +71,30 @@ fn proxy_to_e2b(args: &[String]) -> Result<()> {
     Ok(())
 }
 
-/// Resolve e2b domain and access token from environment variables or user configuration
-fn resolve_e2b_env_vars() -> (Option<String>, Option<String>) {
+/// Handle the `template list` subcommand
+fn run_template_list(args: ListArgs) -> Result<()> {
+    let team_id = if let Some(tid) = args.team {
+        tid
+    } else {
+        read_user_config()
+            .ok()
+            .flatten()
+            .and_then(|c| c.e2b.and_then(|e| e.e2b_team_id))
+            .ok_or_else(|| {
+                anyhow!("Missing team identifier, please use --team or set [e2b].e2b_team_id in the configuration")
+            })?
+    };
+    let cmd_args = vec![
+        "template".to_string(),
+        "list".to_string(),
+        "--team".to_string(),
+        team_id,
+    ];
+    proxy_to_e2b(&cmd_args)
+}
+
+/// Resolve the e2b domain, access token, and API key from environment variables or user configuration
+fn resolve_e2b_env_vars() -> (Option<String>, Option<String>, Option<String>) {
     let user_cfg = read_user_config().ok().flatten();
     let domain = env::var("E2B_DOMAIN").ok().or_else(|| {
         user_cfg
@@ -82,5 +106,10 @@ fn resolve_e2b_env_vars() -> (Option<String>, Option<String>) {
             .as_ref()
             .and_then(|c| c.e2b.as_ref().and_then(|e| e.e2b_access_token.clone()))
     });
-    (domain, token)
+    let api_key = env::var("E2B_API_KEY").ok().or_else(|| {
+        user_cfg
+            .as_ref()
+            .and_then(|c| c.e2b.as_ref().and_then(|e| e.e2b_api_key.clone()))
+    });
+    (domain, token, api_key)
 }
