@@ -48,9 +48,9 @@ async fn main() -> Result<()> {
     }
 }
 
-/// Forward a command to the official e2b CLI and inject required environment variables
+/// Forward a command to the official e2b CLI and inject domain, access token, and API key environment variables
 fn proxy_to_e2b(args: &[String]) -> Result<()> {
-    let (domain_opt, token_opt) = resolve_e2b_env_vars();
+    let (domain_opt, token_opt, api_key_opt) = resolve_e2b_env_vars();
 
     let mut command = std::process::Command::new("e2b");
     command.args(args);
@@ -59,6 +59,9 @@ fn proxy_to_e2b(args: &[String]) -> Result<()> {
     }
     if let Some(token) = token_opt {
         command.env("E2B_ACCESS_TOKEN", token);
+    }
+    if let Some(api_key) = api_key_opt {
+        command.env("E2B_API_KEY", api_key);
     }
 
     let status = command.status().context("failed to execute e2b command")?;
@@ -90,8 +93,8 @@ fn run_template_list(args: ListArgs) -> Result<()> {
     proxy_to_e2b(&cmd_args)
 }
 
-/// Resolve the e2b domain and access token from environment variables or user configuration
-fn resolve_e2b_env_vars() -> (Option<String>, Option<String>) {
+/// Resolve the e2b domain, access token, and API key from environment variables or user configuration
+fn resolve_e2b_env_vars() -> (Option<String>, Option<String>, Option<String>) {
     let user_cfg = read_user_config().ok().flatten();
     let domain = env::var("E2B_DOMAIN").ok().or_else(|| {
         user_cfg
@@ -103,5 +106,10 @@ fn resolve_e2b_env_vars() -> (Option<String>, Option<String>) {
             .as_ref()
             .and_then(|c| c.e2b.as_ref().and_then(|e| e.e2b_access_token.clone()))
     });
-    (domain, token)
+    let api_key = env::var("E2B_API_KEY").ok().or_else(|| {
+        user_cfg
+            .as_ref()
+            .and_then(|c| c.e2b.as_ref().and_then(|e| e.e2b_api_key.clone()))
+    });
+    (domain, token, api_key)
 }

@@ -80,6 +80,7 @@ aws_region = "us-east-1"
 [e2b]
 e2b_domain = "e2b.dev"
 e2b_access_token = "YOUR_TOKEN" # or set environment variable E2B_ACCESS_TOKEN
+e2b_api_key = "YOUR_API_KEY"    # or set environment variable E2B_API_KEY
 e2b_team_id = "YOUR_TEAM_ID"    # overridden by the --team argument
 ```
 
@@ -89,6 +90,7 @@ e2b_team_id = "YOUR_TEAM_ID"    # overridden by the --team argument
 - AWS region: environment variable `AWS_REGION` > user config `[aws].aws_region`
 - e2b domain: environment variable `E2B_DOMAIN` > user config `[e2b].e2b_domain`
 - access token: environment variable `E2B_ACCESS_TOKEN` > user config `[e2b].e2b_access_token`
+- API key: environment variable `E2B_API_KEY` > user config `[e2b].e2b_api_key`
 - team identifier: `--team` > user config `[e2b].e2b_team_id`
 
 ## License
