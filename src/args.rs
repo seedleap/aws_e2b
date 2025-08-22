@@ -58,3 +58,11 @@ pub struct DockerArgs {
     #[arg(long = "base-image", help_heading = "DOCKER")]
     pub base_image: Option<String>,
 }
+
+/// Arguments for the `template list` subcommand
+#[derive(Parser, Debug)]
+pub struct ListArgs {
+    /// Team identifier to query; if omitted it is loaded from the configuration file
+    #[arg(long = "team")]
+    pub team: Option<String>,
+}

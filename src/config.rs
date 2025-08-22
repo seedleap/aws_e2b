@@ -67,6 +67,9 @@ pub struct UserE2bSection {
     pub e2b_domain: Option<String>,
     #[serde(default, rename = "e2b_access_token")]
     pub e2b_access_token: Option<String>,
+    /// e2b team identifier for the user
+    #[serde(default, rename = "e2b_team_id")]
+    pub e2b_team_id: Option<String>,
 }
 
 /// Load `aws_e2b.toml` and return the configuration and its directory
