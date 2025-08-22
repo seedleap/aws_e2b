@@ -1,6 +1,5 @@
 use anyhow::{anyhow, Context, Result};
 use clap::Parser;
-use log::error;
 use std::env;
 
 mod args;
@@ -10,7 +9,7 @@ mod config;
 mod docker_utils;
 mod e2b_api;
 
-use args::{BuildArgs, ListArgs};
+use args::{AwsE2bCli, AwsE2bCommand, ListArgs, TemplateCommand};
 use build::run_template_build;
 use config::read_user_config;
 
@@ -29,40 +28,27 @@ async fn main() -> Result<()> {
         })
         .init();
 
-    let args: Vec<String> = env::args().skip(1).collect();
+    let cli = AwsE2bCli::parse();
 
-    match args.first().map(|s| s.as_str()) {
-        Some("template") => match args.get(1).map(|s| s.as_str()) {
-            Some("build") => {
-                let build_args = BuildArgs::parse_from(
-                    std::iter::once("aws_e2b".to_string()).chain(args.iter().skip(2).cloned()),
-                );
-                return run_template_build(build_args).await;
-            }
-            Some("list") => {
-                let list_args = ListArgs::parse_from(
-                    std::iter::once("aws_e2b".to_string()).chain(args.iter().skip(2).cloned()),
-                );
+    match cli.command {
+        AwsE2bCommand::Template { command } => match command {
+            TemplateCommand::Build(build_args) => run_template_build(build_args).await,
+            TemplateCommand::List(list_args) => {
                 run_template_list(list_args)?;
-                return Ok(());
-            }
-            _ => {
-                error!("aws_e2b does not support this template subcommand");
-                std::process::exit(1);
+                Ok(())
             }
         },
-        Some("sandbox") => {
-            proxy_to_e2b(&args)?;
+        AwsE2bCommand::Sandbox(sandbox_args) => {
+            let forward_args = std::iter::once("sandbox".to_string())
+                .chain(sandbox_args.args.into_iter())
+                .collect::<Vec<String>>();
+            proxy_to_e2b(&forward_args)?;
             Ok(())
-        }
-        _ => {
-            error!("aws_e2b does not support this command");
-            std::process::exit(1);
         }
     }
 }
 
-/// Forward unsupported commands to the official e2b CLI and inject required environment variables
+/// Forward a command to the official e2b CLI and inject required environment variables
 fn proxy_to_e2b(args: &[String]) -> Result<()> {
     let (domain_opt, token_opt) = resolve_e2b_env_vars();
 

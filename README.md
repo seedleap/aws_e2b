@@ -22,6 +22,8 @@ cargo install --git https://github.com/seedleap/aws_e2b
 ```
 
 ## Usage examples
+Run `aws_e2b --help` to view all available commands and options.
+
 Build a template:
 ```bash
 aws_e2b template build \

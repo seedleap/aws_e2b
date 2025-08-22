@@ -1,4 +1,4 @@
-use clap::Parser;
+use clap::{Args, Parser, Subcommand};
 use std::path::PathBuf;
 
 /// All arguments for the `template build` subcommand
@@ -65,4 +65,52 @@ pub struct ListArgs {
     /// Team identifier to query; if omitted it is loaded from the configuration file
     #[arg(long = "team")]
     pub team: Option<String>,
+}
+
+/// Top-level command-line parser for aws_e2b
+#[derive(Parser, Debug)]
+#[command(
+    name = "aws_e2b",
+    about = "AWS wrapper for e2b templates and sandboxes"
+)]
+pub struct AwsE2bCli {
+    /// Supported subcommands for aws_e2b
+    #[command(subcommand)]
+    pub command: AwsE2bCommand,
+}
+
+/// Subcommands available in aws_e2b
+#[derive(Subcommand, Debug)]
+pub enum AwsE2bCommand {
+    /// Manage templates
+    Template {
+        /// Operations related to templates
+        #[command(subcommand)]
+        command: TemplateCommand,
+    },
+    /// Forward sandbox subcommands to the official e2b CLI
+    Sandbox(SandboxArgs),
+}
+
+/// Template-related subcommands
+#[derive(Subcommand, Debug)]
+pub enum TemplateCommand {
+    /// Build a template
+    Build(BuildArgs),
+    /// List templates for a team
+    List(ListArgs),
+}
+
+/// Capture arguments after the `sandbox` subcommand for forwarding
+#[derive(Args, Debug)]
+#[command(
+    about = "Forward sandbox commands to the official e2b CLI",
+    trailing_var_arg = true,
+    allow_hyphen_values = true,
+    disable_help_flag = true
+)]
+pub struct SandboxArgs {
+    /// Arguments to forward after `sandbox`
+    #[arg(required = true)]
+    pub args: Vec<String>,
 }
