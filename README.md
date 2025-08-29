@@ -50,6 +50,7 @@ If `--team` is omitted, the team identifier is read from `[e2b].e2b_team_id` in 
 ## Command forwarding rules
 - `template build` and `template list` are implemented by this tool.
 - `sandbox` subcommands are forwarded to the official `e2b` CLI.
+- `aws_e2b` verifies that the official `e2b` CLI is installed and instructs installation from <https://e2b.dev/docs/cli> when it is missing.
 - All other commands are unsupported.
 
 ## Configuration files

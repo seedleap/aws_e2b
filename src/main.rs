@@ -1,6 +1,7 @@
 use anyhow::{anyhow, Context, Result};
 use clap::Parser;
 use std::env;
+use which::which;
 
 mod args;
 mod aws_utils;
@@ -50,6 +51,13 @@ async fn main() -> Result<()> {
 
 /// Forward a command to the official e2b CLI and inject domain, access token, and API key environment variables
 fn proxy_to_e2b(args: &[String]) -> Result<()> {
+    // Ensure the official e2b CLI is installed before forwarding the command.
+    if which("e2b").is_err() {
+        return Err(anyhow!(
+            "The e2b CLI was not found. Please install it by following https://e2b.dev/docs/cli"
+        ));
+    }
+
     let (domain_opt, token_opt, api_key_opt) = resolve_e2b_env_vars();
 
     let mut command = std::process::Command::new("e2b");
