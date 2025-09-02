@@ -95,7 +95,16 @@ struct StatusResp {
     status: String,
 }
 
-/// Poll build status until completion
+/// Validate that the final build status is ready
+fn ensure_ready_status(status: &str) -> Result<()> {
+    if status == "ready" {
+        Ok(())
+    } else {
+        Err(anyhow!("build did not reach ready status: {}", status))
+    }
+}
+
+/// Poll build status until completion and ensure success
 pub async fn poll_build_status_until_done(
     e2b_domain: &str,
     access_token: &str,
@@ -107,7 +116,7 @@ pub async fn poll_build_status_until_done(
         "https://api.{}/templates/{}/builds/{}/status",
         e2b_domain, template_id, build_id
     );
-    loop {
+    let final_status = loop {
         let mut headers = HeaderMap::new();
         headers.insert(AUTHORIZATION, HeaderValue::from_str(access_token)?);
         let resp = client.get(&url).headers(headers).send().await?;
@@ -125,12 +134,28 @@ pub async fn poll_build_status_until_done(
                     .to_string(),
             })
         })?;
-        info!("Current build status: {}", status_value.status);
-        if status_value.status != "building" {
-            info!("Final status: {}", status_value.status);
-            break;
+        let current_status = status_value.status;
+        info!("Current build status: {}", current_status);
+        if current_status != "building" {
+            info!("Final status: {}", current_status);
+            break current_status;
         }
         tokio::time::sleep(Duration::from_secs(10)).await;
+    };
+    ensure_ready_status(&final_status)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn ensure_ready_status_accepts_ready() {
+        assert!(ensure_ready_status("ready").is_ok());
     }
-    Ok(())
+
+    #[test]
+    fn ensure_ready_status_rejects_non_ready() {
+        assert!(ensure_ready_status("failed").is_err());
+    }
 }
