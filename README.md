@@ -9,6 +9,7 @@ Command-line tool for interacting with e2b templates and sandboxes in a self-hos
 - `docker build` runs with `--platform linux/amd64` to ensure x86 compatibility.
 - Push the base image to Amazon ECR.
 - Notify the e2b API and poll for the build status.
+- The command exits with an error if the final status is not ready.
 
 ## Installation
 From source:
